@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Data and generated artifacts (kept out of git; manifests/stats are committed)
+data/*.jsonl
+data/*.json
+data/raw/
+!data/manifests/
+results/
+logs/
+runs/
+
+# Model weights and checkpoints (submitted separately)
+model/
+checkpoints/
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# LaTeX
+report/*.aux
+report/*.log
+report/*.out
+report/*.bbl
+report/*.blg
+report/*.toc
