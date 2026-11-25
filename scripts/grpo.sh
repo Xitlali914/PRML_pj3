@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=prml-grpo
+#SBATCH --chdir=/home/g19/PRML_pj3
 #SBATCH --gres=gpu:1
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/grpo-%j.log

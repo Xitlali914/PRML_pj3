@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=prml-sft
+#SBATCH --chdir=/home/g19/PRML_pj3
 #SBATCH --gres=gpu:1
 #SBATCH --time=8:00:00
 #SBATCH --output=logs/sft-%j.log
