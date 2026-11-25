@@ -366,8 +366,8 @@ def main(argv: list[str] | None = None) -> None:
                 eval_record = {
                     "update": update,
                     "dev_score": score,
-                    "sorting": metrics["sorting"],
-                    "mapreader": metrics["mapreader"],
+                    "sorting": metrics.get("sorting", {}),
+                    "mapreader": metrics.get("mapreader", {}),
                 }
                 print(f"[grpo] dev {eval_record}")
                 log_handle.write(json.dumps(eval_record, sort_keys=True) + "\n")

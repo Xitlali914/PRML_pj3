@@ -274,8 +274,8 @@ def main(argv: list[str] | None = None) -> None:
             record = {
                 "epoch": epoch,
                 "dev_score": score,
-                "sorting": metrics["sorting"],
-                "mapreader": metrics["mapreader"],
+                "sorting": metrics.get("sorting", {}),
+                "mapreader": metrics.get("mapreader", {}),
             }
             print(f"[sft] dev epoch {epoch}: {record}")
             log_handle.write(json.dumps(record, sort_keys=True) + "\n")
