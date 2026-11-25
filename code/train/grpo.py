@@ -152,7 +152,9 @@ def run_dev_eval(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-model", type=Path, default=BASE_MODEL_DIR)
-    parser.add_argument("--sft-adapter", type=Path, required=True)
+    parser.add_argument("--sft-adapter", type=Path, default=None)
+    parser.add_argument("--resume-dir", type=Path, default=None,
+                        help="checkpoint directory (contains adapter/ and state.pt)")
     parser.add_argument("--instances-dir", type=Path, default=INSTANCES)
     parser.add_argument("--dev-instances", type=Path, default=Path("data/instances/dev.jsonl"))
     parser.add_argument("--output-dir", type=Path, default=GRPO_DIR)
@@ -170,13 +172,28 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--eval-every", type=int, default=25)
     args = parser.parse_args(argv)
+    if args.resume_dir is None and args.sft_adapter is None:
+        parser.error("--sft-adapter is required unless --resume-dir is used")
 
     set_seed(args.seed)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     RESULTS.mkdir(parents=True, exist_ok=True)
     buckets = load_buckets(args.instances_dir)
     tokenizer = load_tokenizer(args.base_model)
-    model = load_trainable_adapter(args.base_model, args.sft_adapter, args.device)
+
+    resume_state = None
+    resume_state_path = None
+    if args.resume_dir is not None:
+        resume_dir = args.resume_dir
+        resume_adapter = resume_dir / "adapter"
+        resume_state_path = resume_dir / "state.pt"
+        if not resume_adapter.is_dir() or not resume_state_path.is_file():
+            raise FileNotFoundError(
+                f"resume checkpoint incomplete: {resume_adapter} / {resume_state_path}"
+            )
+        model = load_trainable_adapter(args.base_model, resume_adapter, args.device)
+    else:
+        model = load_trainable_adapter(args.base_model, args.sft_adapter, args.device)
     trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
 
     engine = RolloutEngine(
@@ -199,7 +216,8 @@ def main(argv: list[str] | None = None) -> None:
 
     config = {
         "base_model": str(args.base_model),
-        "sft_adapter": str(args.sft_adapter),
+        "sft_adapter": str(args.sft_adapter) if args.sft_adapter else None,
+        "resume_dir": str(args.resume_dir) if args.resume_dir else None,
         "updates": updates,
         "group_size": args.group_size,
         "prompts_per_update": args.prompts_per_update,
@@ -218,12 +236,27 @@ def main(argv: list[str] | None = None) -> None:
     log_handle = log_path.open("w", encoding="utf-8", newline="\n")
 
     rng = random.Random(args.seed)
+    start_update = 1
     best_score = -1.0
     best_update = -1
+    if resume_state_path is not None:
+        resume_state = torch.load(
+            resume_state_path, map_location=args.device, weights_only=False
+        )
+        optimizer.load_state_dict(resume_state["optimizer"])
+        scheduler.load_state_dict(resume_state["scheduler"])
+        start_update = int(resume_state["update"]) + 1
+        best_score = float(resume_state["best_score"])
+        best_update = int(resume_state["best_update"])
+        rng.setstate(resume_state["rng"])
+        torch.set_rng_state(resume_state["torch_rng"])
+        if torch.cuda.is_available() and resume_state.get("cuda_rng"):
+            torch.cuda.set_rng_state_all(resume_state["cuda_rng"])
+        print(f"[grpo] resumed from {resume_state_path} at update {start_update}")
     stats: Counter = Counter()
 
     try:
-        for update in range(1, updates + 1):
+        for update in range(start_update, updates + 1):
             model.eval()
             model.config.use_cache = True
             instances = choose_instances(
@@ -316,7 +349,8 @@ def main(argv: list[str] | None = None) -> None:
             log_handle.flush()
 
             if update % args.eval_every == 0 or update == updates:
-                adapter_dir = args.output_dir / f"update_{update}"
+                checkpoint_dir = args.output_dir / f"update_{update}"
+                adapter_dir = checkpoint_dir / "adapter"
                 save_adapter(model, adapter_dir, tokenizer)
                 metrics = run_dev_eval(
                     args.base_model,
@@ -341,6 +375,24 @@ def main(argv: list[str] | None = None) -> None:
                 if score > best_score:
                     best_score = score
                     best_update = update
+
+                state = {
+                    "update": update,
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "best_score": best_score,
+                    "best_update": best_update,
+                    "rng": rng.getstate(),
+                    "torch_rng": torch.get_rng_state(),
+                    "cuda_rng": torch.cuda.get_rng_state_all()
+                    if torch.cuda.is_available()
+                    else [],
+                }
+                torch.save(state, checkpoint_dir / "state.pt")
+                latest = args.output_dir / "latest"
+                if latest.is_symlink() or latest.exists():
+                    latest.unlink()
+                latest.symlink_to(checkpoint_dir.name)
     finally:
         log_handle.close()
         engine.close()
@@ -350,7 +402,7 @@ def main(argv: list[str] | None = None) -> None:
 
     engine.model = None
     del engine
-    best_adapter = args.output_dir / f"update_{best_update}"
+    best_adapter = args.output_dir / f"update_{best_update}" / "adapter"
     final_adapter = args.output_dir / "adapter"
     if final_adapter.exists():
         shutil.rmtree(final_adapter)

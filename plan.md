@@ -1,7 +1,7 @@
 # PRML Project 3 开发方案（v1.1）
 
 > 项目：Training Language Models as Text-Game Agents
-> 基座：`Qwen/Qwen3-4B-Base`
+> 基座：`Qwen/Qwen3-4B`（官方后训练版，关闭 thinking）
 > 任务：TextWorldExpress — Sorting、Map Reader
 > 本文档是唯一开发依据；所有数据规模、超参数、路径与命令均在此固定。
 
@@ -39,7 +39,7 @@
 
 | 决策 | 值 |
 |---|---|
-| 基座 | `Qwen/Qwen3-4B-Base`，纯文本 prompt，无 chat template |
+| 基座 | `Qwen/Qwen3-4B` 官方后训练版，chat template，`enable_thinking=False` |
 | 流程 | 零样本基线 → SFT → GRPO |
 | Sorting 规模 | 训练/dev/test 均为 3–5 个物体 |
 | Map Reader 距离 | 训练/dev/test 均为 d=1/2/3，不含 d=4 |
@@ -61,7 +61,7 @@
 ## 2. 总体流程
 
 ```
-阶段 0  zero-shot：Qwen3-4B-Base + harness → dev 200 → 基线指标
+阶段 0  zero-shot：Qwen3-4B + harness → dev 200 → 基线指标
 阶段 1  SFT：turns_train 10499 turn → LoRA 2 epoch → dev 选最佳 → 合并
 阶段 2  GRPO：SFT adapter + 环境在环 rollout（G=8）→ 300 update → dev 每 25 update
 阶段 3  评测：local-test 只跑一次 → 官方测试集只跑一次
@@ -90,7 +90,7 @@ PRML_pj3/
 │   ├── expected_checksums.json   # 唯一入库的数据文件
 │   └── .gitkeep
 ├── model/                        # 权重（不入库）
-│   ├── Qwen3-4B-Base/
+│   ├── Qwen3-4B/
 │   ├── sft/{adapter,merged}/
 │   └── grpo/{adapter,merged}/
 ├── results/ runs/                # 不入库
@@ -126,33 +126,32 @@ class TWXEnv:
 - 不读取 `infos['done']` / `envStepLimit`；
 - `inventory` 由文本块解析为 `list[str]`。
 
-### 4.3 Prompt（纯文本，Qwen3-4B-Base）
+### 4.3 Prompt（Qwen3-4B chat template，`enable_thinking=False`）
+
+系统消息固定为：
 
 ```text
 You are an agent playing a text game. At each turn, choose exactly one action.
 Reply with the action inside <action></action> and nothing else.
+```
 
-Task: {task}
+用户消息包含 Task、Current observation、Inventory、Valid actions、History；
+渲染统一调用：
 
-Current observation:
-{observation}
-
-Inventory: {inventory}
-
-Valid actions:
-- {action_1}
-...
-
-History:
-[1] {action} -> {observation}
-...
-
-Action:
+```python
+tokenizer.apply_chat_template(
+    [{"role": "system", "content": SYSTEM_PROMPT},
+     {"role": "user", "content": user_content}],
+    tokenize=False,
+    add_generation_prompt=True,
+    enable_thinking=False,
+)
 ```
 
 - 空背包写 `nothing`；空历史写 `(none)`；
 - 历史最多 6 步，每条历史观测截断到 120 token；
 - prompt 上限 1536 token：先丢最旧历史，再截断当前观测；
+- 目标格式：`<action>take 25g of oak</action><|im_end|>`；
 - 不提供 gold path、地图内容或物体数量。
 
 ### 4.4 解析与重试
@@ -304,10 +303,10 @@ python -m code.data.validate_data         # 只校验
 
 ### 6.1 模型
 
-- `Qwen/Qwen3-4B-Base`，bf16；
+- `Qwen/Qwen3-4B`（官方后训练版），bf16；
 - 36 层、hidden 2560、vocab 151936、8 KV head；
-- tokenizer 同目录，`pad_token = eos_token`；
-- 纯文本模板，无 chat token。
+- tokenizer 同目录，`pad_token` 为 `<|endoftext|>`，`eos_token` 为 `<|im_end|>`；
+- 所有 prompt 走 chat template，并设置 `enable_thinking=False`。
 
 ### 6.2 LoRA
 
@@ -347,7 +346,7 @@ python -m code.data.validate_data         # 只校验
 
 ```bash
 python -m code.eval.evaluate \
-  --model-dir model/Qwen3-4B-Base \
+  --model-dir model/Qwen3-4B \
   --instances data/instances/dev.jsonl \
   --output results/zero_shot_dev.jsonl
 ```
@@ -372,8 +371,10 @@ greedy、最多 10 步、1 次修复重试；输出三项指标与逐实例轨�
 | 精度 | bf16 + TF32 + gradient checkpointing |
 | 保存 | 每 epoch 在 dev 上评测，保留成功率最高版本 |
 
+SFT 目标为 `<action>...</action><|im_end|>`；prompt 使用 §4.3 的 chat template。
+
 ```bash
-python -m code.train.sft --base-model model/Qwen3-4B-Base --output-dir model/sft
+python -m code.train.sft --base-model model/Qwen3-4B --output-dir model/sft
 ```
 
 产出 `model/sft/adapter/` 与 `model/sft/merged/`。进入 GRPO 前 dev 成绩须高于零样本。
@@ -446,7 +447,7 @@ R = 1.0 × success
 | 保存 | 两任务平均成功率最高的 adapter 与 merged |
 
 ```bash
-python -m code.train.grpo --base-model model/Qwen3-4B-Base \
+python -m code.train.grpo --base-model model/Qwen3-4B \
   --sft-adapter model/sft/adapter --output-dir model/grpo
 ```
 
@@ -510,10 +511,10 @@ python run.py --model-dir model/grpo/merged \
 
 ```bash
 python -m code.data.generate_all
-python -m code.eval.evaluate --model-dir model/Qwen3-4B-Base \
+python -m code.eval.evaluate --model-dir model/Qwen3-4B \
   --instances data/instances/dev.jsonl --output results/zero_shot_dev.jsonl
-python -m code.train.sft --base-model model/Qwen3-4B-Base --output-dir model/sft
-python -m code.train.grpo --base-model model/Qwen3-4B-Base \
+python -m code.train.sft --base-model model/Qwen3-4B --output-dir model/sft
+python -m code.train.grpo --base-model model/Qwen3-4B \
   --sft-adapter model/sft/adapter --output-dir model/grpo
 python run.py --model-dir model/grpo/merged \
   --instances data/instances/test.jsonl --output results/final_test.jsonl
@@ -552,9 +553,27 @@ Git：入库 `third_party/`、`code/`、`run.py`、`requirements.txt`、`plan.md
 
 ---
 
-## 15. 待确认
+## 15. 服务器执行（Slurm）
+
+服务器事实：开发容器无 GPU（4 核 / 16GB cgroup），训练/评测必须走 Slurm；
+GPU 为 RTX 4090 D 24GB，每组最多 2 卡，单任务上限 24h，总额 350 卡时；
+计算节点也没有系统 Java，已用 `jdk4py` 提供用户级 JRE。
+
+- 基座：`/shared/models/Qwen3-4B` 复制到 `model/Qwen3-4B/`；
+- Python：`/home/g19/.venv`（torch 2.14.1+cu130、transformers 5.20.2、peft、jdk4py）；
+- `code/env/twx.py` 会自动把 jdk4py 的 `bin/java` 加入 `PATH`，无需 root；
+- 数据生成（CPU，约 3 分钟）：
+  `srun -p debug -c 4 -t 10 bash -lc 'cd ~/PRML_pj3 && ~/.venv/bin/python -m code.data.generate_all'`
+- 零样本 / SFT / GRPO / 测试均通过 `srun` 或 `sbatch --gres=gpu:1` 申请 GPU；
+- SFT 预计 2–4h，用 `-t 8:00:00`；
+- GRPO 每 25 update 保存 `update_N/adapter`、`state.pt`，并更新 `latest` 符号链接；
+  24h 任务到期后用 `--resume-dir model/grpo/latest` 续训；
+- 评测时 `HF_HUB_OFFLINE=1`，只读本地权重与数据。
+
+---
+
+## 16. 待确认
 
 1. 课程评测配置是否与本文一致（Sorting ≤5 物体，Map Reader d≤3）。
-2. `Qwen3-4B-Base` 是否满足课程“Qwen3-4B 为基座”的要求。
-3. 官方测试集实例格式，用于适配 `run.py`。
-4. “两任务各占 50%”的口径。
+2. 官方测试集实例格式，用于适配 `run.py`。
+3. “两任务各占 50%”的口径。

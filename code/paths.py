@@ -17,7 +17,7 @@ RESULTS = ROOT / "results"
 INSTANCES = DATA / "instances"
 SFT = DATA / "sft"
 
-BASE_MODEL_DIR = MODEL / "Qwen3-4B-Base"
+BASE_MODEL_DIR = MODEL / "Qwen3-4B"
 SFT_DIR = MODEL / "sft"
 GRPO_DIR = MODEL / "grpo"
 

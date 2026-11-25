@@ -64,7 +64,8 @@ def act(
     if not parsed:
         retries = 1
         text = generate_text(
-            model, tokenizer, repair_prompt(prompt), device, max_new_tokens, do_sample=False
+            model, tokenizer, repair_prompt(prompt, tokenizer), device,
+            max_new_tokens, do_sample=False,
         )
         action, parsed = parse_action(text, valid_actions)
     return action, parsed, text, retries

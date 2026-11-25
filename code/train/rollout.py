@@ -161,7 +161,7 @@ class RolloutEngine:
                     failed.append(position)
             if failed:
                 repairs = self._generate(
-                    [repair_prompt(prompts[position]) for position in failed]
+                    [repair_prompt(prompts[position], self.tokenizer) for position in failed]
                 )
                 for position, generation in zip(failed, repairs):
                     generations[position] = generation

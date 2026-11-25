@@ -59,7 +59,7 @@ class TurnDataset(Dataset):
             tokenizer=self.tokenizer,
             max_prompt_tokens=self.max_prompt_tokens,
         )
-        target = target_text(row["target_action"])
+        target = target_text(row["target_action"], self.tokenizer)
         prompt_ids = self.tokenizer(prompt, add_special_tokens=False)["input_ids"]
         target_ids = self.tokenizer(target, add_special_tokens=False)["input_ids"]
         prompt_ids = prompt_ids[-self.max_prompt_tokens :]

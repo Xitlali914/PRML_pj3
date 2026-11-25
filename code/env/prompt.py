@@ -1,4 +1,10 @@
-"""Plain-text prompt rendering and action parsing (Qwen3-4B-Base, no chat template)."""
+"""Chat-template prompt rendering for Qwen3-4B (thinking disabled).
+
+The model provided by the course is the post-trained Qwen3-4B, so every prompt
+is rendered through the tokenizer's chat template with ``enable_thinking=False``.
+The structured game state is unchanged; only the renderer differs from a base
+model setup.
+"""
 
 from __future__ import annotations
 
@@ -10,16 +16,16 @@ MAX_HISTORY = 6
 MAX_HISTORY_OBS_TOKENS = 120
 MAX_ACTION_TOKENS = 48
 
-_HEADER = (
-    "You are an agent playing a text game. At each turn, choose exactly one action.\n"
+SYSTEM_PROMPT = (
+    "You are an agent playing a text game. At each turn, choose exactly one action. "
     "Reply with the action inside <action></action> and nothing else."
 )
 
 _ACTION_RE = re.compile(r"<action>\s*(.*?)\s*</action>", re.IGNORECASE | re.DOTALL)
 
-REPAIR_SUFFIX = (
-    "\n\nYour previous reply was not a valid action. Reply with exactly one action "
-    "from the valid actions, inside <action></action>.\n\nAction:"
+REPAIR_INSTRUCTION = (
+    "Your previous reply was not a valid action. Reply with exactly one action "
+    "from the valid actions, inside <action></action>."
 )
 
 
@@ -40,7 +46,7 @@ def _count_tokens(text: str, tokenizer: Any) -> int:
     return len(tokenizer.encode(text, add_special_tokens=False))
 
 
-def _render(
+def _user_content(
     task: str,
     observation: str,
     inventory: Sequence[str],
@@ -48,8 +54,6 @@ def _render(
     history: Sequence[tuple[str, str]],
 ) -> str:
     lines = [
-        _HEADER,
-        "",
         f"Task: {task.strip()}",
         "",
         "Current observation:",
@@ -66,8 +70,32 @@ def _render(
             lines.append(f"[{index}] {action} -> {obs}")
     else:
         lines.append("(none)")
-    lines.extend(["", "Action:"])
     return "\n".join(lines)
+
+
+def _render_chat(
+    task: str,
+    observation: str,
+    inventory: Sequence[str],
+    valid_actions: Sequence[str],
+    history: Sequence[tuple[str, str]],
+    tokenizer: Any,
+) -> str:
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": _user_content(
+                task, observation, inventory, valid_actions, history
+            ),
+        },
+    ]
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
 
 
 def render_prompt(
@@ -76,30 +104,33 @@ def render_prompt(
     inventory: Sequence[str],
     valid_actions: Sequence[str],
     history: Sequence[tuple[str, str]],
-    tokenizer: Any = None,
+    tokenizer: Any,
     max_prompt_tokens: int = MAX_PROMPT_TOKENS,
     max_history: int = MAX_HISTORY,
     max_history_obs_tokens: int = MAX_HISTORY_OBS_TOKENS,
 ) -> str:
-    """Render one prompt.
+    """Render one chat prompt.
 
-    History is kept to the most recent ``max_history`` steps, each observation is
-    collapsed to one line and truncated to ``max_history_obs_tokens`` tokens.
-    If the prompt is still too long, the oldest history entries are dropped and
-    finally the current observation is truncated from its end.
+    History is capped at ``max_history`` steps, each history observation is
+    collapsed and truncated, and the final prompt is kept under
+    ``max_prompt_tokens`` by dropping old history and then shortening the
+    current observation.
     """
+    if tokenizer is None:
+        raise ValueError("the Qwen3-4B renderer requires a tokenizer")
+
     hist = [
         (action, _one_line(_truncate_to_tokens(obs, tokenizer, max_history_obs_tokens)))
         for action, obs in history
     ][-max_history:]
 
-    text = _render(task, observation, inventory, valid_actions, hist)
-    if tokenizer is None or _count_tokens(text, tokenizer) <= max_prompt_tokens:
+    text = _render_chat(task, observation, inventory, valid_actions, hist, tokenizer)
+    if _count_tokens(text, tokenizer) <= max_prompt_tokens:
         return text
 
     while hist and _count_tokens(text, tokenizer) > max_prompt_tokens:
         hist.pop(0)
-        text = _render(task, observation, inventory, valid_actions, hist)
+        text = _render_chat(task, observation, inventory, valid_actions, hist, tokenizer)
     if _count_tokens(text, tokenizer) <= max_prompt_tokens:
         return text
 
@@ -108,21 +139,32 @@ def render_prompt(
     while lo < hi:
         mid = (lo + hi + 1) // 2
         candidate = tokenizer.decode(ids[:mid], skip_special_tokens=True)
-        candidate_text = _render(task, candidate, inventory, valid_actions, hist)
+        candidate_text = _render_chat(
+            task, candidate, inventory, valid_actions, hist, tokenizer
+        )
         if _count_tokens(candidate_text, tokenizer) <= max_prompt_tokens:
             lo = mid
         else:
             hi = mid - 1
     observation = tokenizer.decode(ids[:lo], skip_special_tokens=True)
-    return _render(task, observation, inventory, valid_actions, hist)
+    return _render_chat(task, observation, inventory, valid_actions, hist, tokenizer)
 
 
-def target_text(action: str) -> str:
-    return f"<action>{action}</action>"
+def target_text(action: str, tokenizer: Any) -> str:
+    return f"<action>{action}</action>{tokenizer.eos_token}"
 
 
-def repair_prompt(prompt: str) -> str:
-    return prompt + REPAIR_SUFFIX
+def repair_prompt(prompt: str, tokenizer: Any) -> str:
+    """Append a corrective user turn after a malformed assistant reply."""
+    eos = tokenizer.eos_token
+    return (
+        prompt
+        + eos
+        + "\n<|im_start|>user\n"
+        + REPAIR_INSTRUCTION
+        + eos
+        + "\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    )
 
 
 def _normalise(text: str) -> str:
@@ -132,12 +174,7 @@ def _normalise(text: str) -> str:
 
 
 def parse_action(text: str, valid_actions: Iterable[str]) -> tuple[str, bool]:
-    """Extract one action from a model reply.
-
-    Returns ``(action, parsed)``. When the reply matches a valid action, the
-    canonical action string is returned; otherwise the raw candidate string is
-    returned (the environment will treat it as invalid) and ``parsed`` is False.
-    """
+    """Extract one action from a model reply."""
     matches = _ACTION_RE.findall(text or "")
     if matches:
         candidate = matches[-1]

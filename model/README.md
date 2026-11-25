@@ -1,10 +1,14 @@
 # Model weights
 
-This directory is git-ignored. Put the base model snapshot here as:
+This directory is git-ignored. Put the official Qwen3-4B snapshot here as:
 
 ```
-model/Qwen3-4B-Base/
+model/Qwen3-4B/
 ```
+
+The server copy is `cp -a /shared/models/Qwen3-4B model/Qwen3-4B`.
+The code renders every prompt through this tokenizer's chat template with
+`enable_thinking=False`.
 
 Training writes:
 

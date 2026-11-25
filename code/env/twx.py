@@ -10,6 +10,7 @@ The wrapper has three jobs:
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,26 @@ from code.paths import THIRD_PARTY
 EXPECTED_JAR_SHA256 = (
     "23da9ab053dde2de003b4556a2734af3225dc3a0ef8af7354df53aafb5c77d99"
 )
+
+
+def _ensure_java() -> None:
+    """Use the user-level jdk4py JRE when the system has no java on PATH."""
+    try:
+        import jdk4py
+    except ImportError:
+        return
+    try:
+        java_home = Path(jdk4py.JAVA_HOME)
+    except AttributeError:
+        return
+    java = java_home / "bin" / "java"
+    if not java.is_file():
+        return
+    os.environ["JAVA_HOME"] = str(java_home)
+    os.environ["PATH"] = str(java_home / "bin") + os.pathsep + os.environ.get("PATH", "")
+
+
+_ensure_java()
 
 if str(THIRD_PARTY) not in sys.path:
     sys.path.insert(0, str(THIRD_PARTY))

@@ -1,6 +1,8 @@
 # Runtime dependencies for training and evaluation.
 # Data generation only needs Java and the vendored runtime in third_party/.
+# jdk4py provides a user-level JRE when the machine has no system Java.
 torch>=2.3
 transformers>=4.51
 peft>=0.10
 accelerate>=0.30
+jdk4py>=25.0.5
