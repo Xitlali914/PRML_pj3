@@ -3,8 +3,4 @@
 set -euo pipefail
 source "$HOME/PRML_pj3/scripts/env.sh"
 
-srun -D "$REPO" -p debug --gres=gpu:1 -t 20 "$PY" run.py \
-  --model-dir model/grpo/merged \
-  --instances data/instances/test.jsonl \
-  --output results/final_test.jsonl \
-  --device cuda
+srun -p debug --gres=gpu:1 -t 20 bash -lc "cd '$REPO' && '$PY' run.py --model-dir model/grpo/merged --instances data/instances/test.jsonl --output results/final_test.jsonl --device cuda"

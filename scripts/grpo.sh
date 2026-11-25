@@ -3,7 +3,7 @@
 #SBATCH --chdir=/home/g19/PRML_pj3
 #SBATCH --gres=gpu:1
 #SBATCH --time=24:00:00
-#SBATCH --output=logs/grpo-%j.log
+#SBATCH --output=/home/g19/PRML_pj3/logs/grpo-%j.log
 
 set -euo pipefail
 source "$HOME/PRML_pj3/scripts/env.sh"

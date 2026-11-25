@@ -4,6 +4,7 @@ set -euo pipefail
 
 export REPO="${REPO:-$HOME/PRML_pj3}"
 export PY="$HOME/.venv/bin/python"
+export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 
