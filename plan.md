@@ -96,7 +96,7 @@ zero-shot 评测  →  SFT（专家轨迹，LoRA）  →  GRPO（环境在环，
 
 | 决策 | 选择 | 理由 |
 |---|---|---|
-| 模型 | Qwen3-4B（关闭 thinking） | 课程指定；非思考模式输出短、延迟低，适合 10 步预算 |
+| 模型 | Qwen3-4B-Base（默认；官方 Qwen3-4B 后训练版为备选） | 课程指定 4B；纯基座无 chat template，SFT 冷启动必需；官方版只换 renderer（见 `docs/DATA.md` 附录 B） |
 | 微调方式 | LoRA（r=32），评测前合并 | 24GB 显存；提交要求允许 |
 | 训练样本 | 按“回合（turn）”切分，而非整条轨迹 | 动作只有几十个 token，避免长序列 logits 显存爆炸 |
 | rollout 引擎 | 先 HF `generate`，vLLM 作为加速备选 | 轨迹短（≤10 步 × ≤48 token），HF 已够用；vLLM 与训练共卡复杂 |
@@ -125,6 +125,9 @@ class TWXEnv:
 - 动作原样传给环境（小写、去首尾空白），环境返回 `Unknown action` 记为无效动作。
 
 ### 3.2 Prompt 模板
+
+> 下面是逻辑结构；实际渲染随基座切换（Base 用纯文本模板、官方版用 chat template），
+> 具体模板与截断规则见 [`docs/DATA.md`](docs/DATA.md) 附录 B。
 
 ```
 <system>
@@ -205,6 +208,8 @@ def run_episode(env, policy, instance, max_actions=10):
 
 数据分两类：**实例（prompt 池）** 和 **专家轨迹（SFT 用）**。
 两类都只使用 train fold；dev/test 只用于选模和最终评测。
+
+> 详细的数据清单、字段规范、生成命令与验收标准见 [`docs/DATA.md`](docs/DATA.md)。
 
 ### 4.1 实例生成
 
@@ -312,7 +317,8 @@ def run_episode(env, policy, instance, max_actions=10):
 
 ### 5.1 模型与精度
 
-- `Qwen/Qwen3-4B`，bf16；chat template，`enable_thinking=False`；
+- `Qwen/Qwen3-4B-Base`（默认；官方 `Qwen/Qwen3-4B` 为备选），bf16；Base 用纯文本模板，
+  官方版用 chat template + `enable_thinking=False`（见 `docs/DATA.md` 附录 B）；
 - LoRA：`r=32, alpha=64, dropout=0.05`，目标模块
   `q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj`；
 - 训练精度 bf16 + TF32；开启 gradient checkpointing；
@@ -674,8 +680,8 @@ PRML_pj3/
    `maxDistanceApart` 是否包含 4（10 步预算下 `d=4` 基本不可满分）。
 2. **动作约束**：评测是否允许用 `validActions` 做约束解码/动作校验？还是必须自由生成？
    （本方案默认自由生成 + 修复重试，约束解码仅作消融。）
-3. **模型变体**：`Qwen3-4B-Instruct-2507`（非思考版）是否算“Qwen3-4B”？
-   若允许，可省掉关闭 thinking 的麻烦。
+3. **模型变体**：使用 `Qwen3-4B-Base`（纯基座）是否满足课程“Qwen3-4B 为基座”的要求？
+   若必须使用官方后训练版，我们只切换 renderer，数据不变。
 4. **训练算力**：课程是否对训练时长/卡数有隐性要求？（评测预算明确是 4090 24GB。）
 5. **提交细节**：`model/` 的打包方式、`run.py` 的配置格式是否有统一模板？
 6. **评分口径**：“两个任务各占 50%”是按成功率加权，还是综合三项指标？报告里如何呈现？

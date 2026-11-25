@@ -7,11 +7,11 @@ venv/
 .pytest_cache/
 .ipynb_checkpoints/
 
-# Data and generated artifacts (kept out of git; manifests/stats are committed)
-data/*.jsonl
-data/*.json
+# Data: manifests / stats / datasheet are committed; generated artifacts are not
+data/sft/
+data/rft/
+data/analysis/
 data/raw/
-!data/manifests/
 results/
 logs/
 runs/
