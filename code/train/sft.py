@@ -268,9 +268,9 @@ def main(argv: list[str] | None = None) -> None:
                 metrics_path,
                 args.device,
             )
-            score = 0.5 * metrics["sorting"]["success_rate"] + 0.5 * metrics[
-                "mapreader"
-            ]["success_rate"]
+            score = 0.5 * metrics.get("sorting", {}).get("success_rate", 0.0) + 0.5 * metrics.get(
+                "mapreader", {}
+            ).get("success_rate", 0.0)
             record = {
                 "epoch": epoch,
                 "dev_score": score,

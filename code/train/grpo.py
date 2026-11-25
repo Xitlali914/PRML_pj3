@@ -360,9 +360,9 @@ def main(argv: list[str] | None = None) -> None:
                     RESULTS / f"grpo_update{update}.metrics.json",
                     args.device,
                 )
-                score = 0.5 * metrics["sorting"]["success_rate"] + 0.5 * metrics[
-                    "mapreader"
-                ]["success_rate"]
+                score = 0.5 * metrics.get("sorting", {}).get("success_rate", 0.0) + 0.5 * metrics.get(
+                    "mapreader", {}
+                ).get("success_rate", 0.0)
                 eval_record = {
                     "update": update,
                     "dev_score": score,
