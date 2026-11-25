@@ -1,28 +1,24 @@
 # Python
 __pycache__/
 *.py[cod]
-*.egg-info/
 .venv/
-venv/
 .pytest_cache/
-.ipynb_checkpoints/
+*.egg-info/
 
-# Data: manifests / stats / datasheet are committed; generated artifacts are not
+# Generated data: regenerate with `python -m code.data.generate_all`
+data/instances/
 data/sft/
-data/rft/
-data/analysis/
-data/raw/
+data/validation_report.json
+
+# Model weights (downloaded separately; never committed)
+model/*
+!model/.gitkeep
+!model/README.md
+
+# Training / evaluation artifacts
+runs/
 results/
 logs/
-runs/
-
-# Model weights and checkpoints (submitted separately)
-model/
-checkpoints/
-*.safetensors
-*.bin
-*.pt
-*.ckpt
 
 # OS / editor
 .DS_Store

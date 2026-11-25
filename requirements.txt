@@ -1,0 +1,6 @@
+# Runtime dependencies for training and evaluation.
+# Data generation only needs Java and the vendored runtime in third_party/.
+torch>=2.3
+transformers>=4.51
+peft>=0.10
+accelerate>=0.30

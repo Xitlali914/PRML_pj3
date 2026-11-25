@@ -1,0 +1,15 @@
+{
+  "files": {
+    "instances/dev.jsonl": "c81583f885311f9b0397ad949b0fbd0af78ee5da14b8ffb908959a287552f03e",
+    "instances/mapreader_train.jsonl": "2f359ef02e1881f7f058628411fc46daef9b7cde84680eedc6804f78f441ab5d",
+    "instances/meta.json": "b756a106e6f53504e46d765b029028990ca01f78ce4fde27b1c87a158fbcac78",
+    "instances/sorting_train.jsonl": "7ac47c6982aca6ce00ae351d7e3aa23d4a9eced38ff6573e0fb4b0e2c71a80ef",
+    "instances/test.jsonl": "09a339b8429024f07218f1a7780effa75e6c7260ca1d9cfc94e78fdddfafd717",
+    "sft/expert_meta.json": "2fe65e8f749d5b9f19c130dbb077be103d852d10a574b2a3e35760be0dc65cbc",
+    "sft/mapreader_expert.jsonl": "d2bc4cb004ea3b95488d120d915c9881e8d4e31e197cee2adf0d4892b8706bb0",
+    "sft/sorting_expert.jsonl": "99c335353bccbb819a8d67be8b26ea173f814211f4a9e00df598b69ef3633e78",
+    "sft/turns_meta.json": "5b56f535149338287b3ce39ff7dac1904b92bcd6a7795bfe7f567252b24d2958",
+    "sft/turns_train.jsonl": "94cd1694b12bad0e600de08d604b12b120ede241c009d8ef4e281cd5ce8b8ecc",
+    "sft/turns_val.jsonl": "6010866d6f88595de2c12a76697e81e5c9783c117e35e0c4122f4bbe0d937282"
+  }
+}
