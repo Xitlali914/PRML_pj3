@@ -1,43 +1,189 @@
 # PRML Project 3: Training Language Models as Text-Game Agents
 
-本仓库是 PRML 课程项目 3 的代码与文档仓库。项目要求以 Qwen3-1.7B 或 Qwen3-4B 为基座模型，
-训练一个能够通过多轮文本交互完成任务的智能体；训练算法、奖励设计与数据构造由各组自行决定，
-但必须实际更新模型参数。本组选择 **Qwen3-4B** 作为基座模型。
+本仓库是 PRML 课程项目 3 的完整实现：以 **Qwen3-4B** 为基座，在
+TextWorldExpress 的 **Sorting** 与 **Map Reader** 两个任务上完成
+**零样本基线 → SFT → GRPO** 的训练与评测。实验记录见
+[`report/EXPERIMENTS.md`](report/EXPERIMENTS.md)，设计与环境见
+[`plan.md`](plan.md)。
 
-## 任务环境：TextWorldExpress
+## 目录结构
 
-[TextWorldExpress](https://github.com/cognitiveailab/TextWorldExpress) 是文本游戏基准的高速
-重实现（Jansen & Côté, 2022），用 Scala 编写并通过 py4j 提供 Python API。课程使用其中两个任务：
+```text
+PRML_pj3/
+├── plan.md / README.md
+├── requirements.txt
+├── run.py                      # 官方测试入口（占位，待测试文件格式确定）
+├── third_party/                # 内置 TextWorldExpress 1.1.0 + py4j（无需联网）
+├── code/
+│   ├── paths.py
+│   ├── env/{twx.py, prompt.py} # 环境封装、Qwen3 chat prompt、动作解析
+│   ├── data/                   # 实例、专家轨迹、SFT turn、校验
+│   ├── eval/evaluate.py        # 零样本/SFT/GRPO 共用评测器
+│   └── train/{sft.py, grpo.py, rollout.py, reward.py, model.py}
+├── scripts/                    # 服务器 Slurm 与复现脚本
+├── report/EXPERIMENTS.md       # 实验报告（已入库）
+├── data/                       # 生成数据（gitignore，脚本重建）
+├── model/                      # 模型权重（gitignore）
+└── results/ runs/ logs/        # 输出（gitignore）
+```
 
-- **Sorting（"sorting"）**：智能体需要按数量从小到大的顺序，把物体逐个放入答案箱。
-  物体数量可能带计量单位（如 `mg`、`g`、`kg`，也涉及体积、长度），需要跨单位比较。
-  得分为正确排序物体数占总数的比例，全部放对得 1.0；顺序错误会导致任务失败并结束。
-- **Map Reader（"mapreader"）**：智能体需要根据提供的地图，前往某个房间找到硬币，
-  再把它带回起点房间放入箱子。拿到硬币得 0.5 分，放入箱子得 1.0 分。
-  地图需要通过 `read map` 动作读取，初始观测中不包含地图内容。
+## 实验环境
 
-## 交互与评测协议
+代码在课程服务器上验证：
 
-课程对交互实现与评测的要求（摘要）：
+- Ubuntu 22.04，开发容器 4 核 / 16GB，无 GPU；
+- Slurm 分配 **RTX 4090 D 24GB**，每组最多 2 卡，单任务 ≤24h；
+- `/home/g19/.venv`：Python 3.10、torch 2.14.1+cu130、transformers 5.20.2、peft；
+- 无系统 Java，安装 `jdk4py` 提供用户级 JRE；
+- 基座：`/shared/models/Qwen3-4B`（官方后训练版，`enable_thinking=False`）。
 
-- 每个测试实例最多执行 **10 次动作**；
-- 分别统计两个任务的**成功率**、**成功时的平均步数**、**无效动作比例**，
-  两个任务分数各占 50%；
-- 评测预算为单张 **RTX 4090（24GB）**；评测时模型参数固定，不访问网络、其他模型、
-  参考答案或额外环境模拟；不同实例之间清空交互历史；
-- 动作决策必须由模型产生，不允许内置任务专用求解器或参考策略替代模型。
+## 复现全流程
 
-## 交付物
+以下命令均在**服务器**上、仓库根目录执行。
 
-- `model/`：HuggingFace 格式的完整权重（LoRA 需先合并）；
-- `run.py`：可直接执行的交互评测入口，支持 Sorting 和 Map Reader，接收模型目录与评测配置，
-  输出评测结果和逐轮轨迹；
-- `code/`：数据处理与训练代码，附复现说明；
-- `report.pdf`：实验报告（ICLR 2025 模板，英文，不超过 10 页）。
+### 0. 准备环境与权重（一次性）
 
-## 参考资料
+```bash
+cd ~/PRML_pj3
 
-- TextWorldExpress: <https://github.com/cognitiveailab/TextWorldExpress>
-- Jansen, P. A., & Côté, M.-A. (2022). *TextWorldExpress: Simulating Text Games at One Million
-  Steps Per Second.* arXiv:2208.01174. <https://arxiv.org/abs/2208.01174>
-- Qwen3 模型: <https://github.com/QwenLM/Qwen3>
+# 安装用户级 JDK（无 root）；已安装可跳过
+bash scripts/setup_server.sh
+
+# 把课程提供的模型复制到项目 model/（约 7.6GB）
+mkdir -p model
+cp -a /shared/models/Qwen3-4B model/Qwen3-4B
+
+# Python 依赖已预装；若新机器则：
+# uv pip install --python ~/.venv/bin/python -r requirements.txt
+```
+
+确认：
+
+```bash
+ls model/Qwen3-4B/config.json
+~/.venv/bin/python -c "import torch, transformers, peft; print(torch.__version__)"
+```
+
+### 1. 生成数据（CPU，约 3 分钟）
+
+```bash
+bash scripts/gen_data.sh
+```
+
+等价命令：
+
+```bash
+srun -p debug -c 4 -t 10 bash -lc "cd ~/PRML_pj3 && ~/.venv/bin/python -m code.data.generate_all"
+```
+
+输出：
+
+```text
+data/instances/{sorting_train,mapreader_train,dev,test}.jsonl
+data/sft/{sorting_expert,mapreader_expert,turns_train,turns_val}.jsonl
+```
+
+生成脚本会与仓库内 `data/expected_checksums.json` 逐文件比对；哈希不一致会直接失败。
+数据规模：Sorting 1000、Map Reader 3000、dev/test 各 200、SFT 11100 turn。
+
+### 2. 零样本基线
+
+```bash
+bash scripts/zero_shot.sh
+```
+
+等价命令：
+
+```bash
+python -m code.eval.evaluate \
+  --model-dir model/Qwen3-4B \
+  --instances data/instances/dev.jsonl \
+  --output results/zero_shot_dev.jsonl \
+  --device cuda
+```
+
+输出：`results/zero_shot_dev.jsonl`、`results/zero_shot_dev.metrics.json`。
+
+### 3. SFT
+
+```bash
+sbatch scripts/sft.sh
+```
+
+等价命令：
+
+```bash
+python -m code.train.sft --base-model model/Qwen3-4B --output-dir model/sft
+```
+
+- 2 epoch，LoRA r=32，lr 1e-4，有效 batch 16；
+- 每个 epoch 在 dev 200 上评测，保留最佳；
+- 产出 `model/sft/{adapter,merged}`、`model/sft/result.json`；
+- 耗时约 1.5h（4090 D）。
+
+### 4. GRPO
+
+```bash
+sbatch scripts/grpo.sh
+```
+
+等价命令：
+
+```bash
+python -m code.train.grpo \
+  --base-model model/Qwen3-4B \
+  --sft-adapter model/sft/adapter \
+  --output-dir model/grpo
+```
+
+- 300 update，G=8，8 prompt/update，KL=0.001，clip=0.2；
+- 每 25 update 在 dev 上评测并存 `model/grpo/update_N/{adapter,state.pt}`；
+- 24h 任务被打断后，再次 `sbatch scripts/grpo.sh` 会自动从 `model/grpo/latest` 续训；
+- 产出 `model/grpo/merged`（最佳 update 的合并权重）。
+
+### 5. 评测
+
+**本地 test（`data/instances/test.jsonl`）**：
+
+```bash
+bash scripts/eval_test.sh
+```
+
+输出 `results/final_test.jsonl` 与 `.metrics.json`。
+
+**官方测试集**：测试文件尚未提供，`run.py` 目前是占位入口：
+
+```bash
+python run.py --help
+```
+
+待官方格式确定后再实现实例加载与字段映射。
+
+## 结果
+
+| 阶段 | Sorting | Map Reader | 总体 | 无效动作率 |
+|---|---|---|---|---|
+| Zero-shot | 18% | 58% | 38% | 0.39% |
+| SFT | 94% | 90% | 92% | 0.13% |
+| GRPO | 98% | 91% | 94.5% | 0.00% |
+
+详细表格、复现命令与数据位置见 [`report/EXPERIMENTS.md`](report/EXPERIMENTS.md)。
+
+## 监控训练
+
+```bash
+squeue --me
+sacct -j <jobid> -X -o JobID,JobName,State,Elapsed,AllocTRES
+tail -f logs/grpo-<jobid>.log
+grep dev_score model/grpo/grpo_log.jsonl | tail -5
+cat model/grpo/result.json
+```
+
+## 关键约定
+
+- 所有 prompt 走 Qwen3 chat template，`enable_thinking=False`；
+- 每实例最多 10 次环境动作，greedy 评测；
+- 数据只使用 train fold（seed 0–999），dev 10000+ 选模，test 20000+ 只跑一次；
+- 训练/评测/数据生成共用同一套 harness 和动作解析；
+- 运行时由 `third_party/` 提供，不依赖联网安装；
+- `data/`、`model/`、`results/`、`logs/` 不入库，按上面命令重建。
